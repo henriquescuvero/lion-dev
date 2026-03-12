@@ -56,13 +56,14 @@ export function useMessages(projectId: string | null) {
       .single()
 
     if (error || !data) return null
-    const message = data as unknown as Message
-    setMessages((prev) => [...prev, message])
-    return message
+    return data as unknown as Message
   }
 
   function addLocalMessage(msg: Message) {
-    setMessages((prev) => [...prev, msg])
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === msg.id)) return prev
+      return [...prev, msg]
+    })
   }
 
   function clearMessages() {

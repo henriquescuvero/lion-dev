@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback } from 'react'
 import { ChatMessage } from './chat-message'
 import { ChatInput } from './chat-input'
-import { StreamingMessage } from './streaming-message'
+import { StreamingMessage, LoadingIndicator } from './streaming-message'
 import { useChat } from '@/hooks/use-chat'
 import { useAppStore } from '@/stores/app-store'
 import type { Project } from '@/hooks/use-projects'
@@ -51,21 +51,7 @@ export function ChatPanel({ project, updateProject }: ChatPanelProps) {
 
         {isLoading && streamingText && <StreamingMessage text={streamingText} />}
 
-        {isLoading && !streamingText && (
-          <div className="flex items-center gap-3 px-4 py-3 animate-fade-in">
-            <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 bg-primary/10 border border-primary/20">
-              <span className="text-sm">🦁</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-              <span className="text-xs text-text-muted">Gerando template...</span>
-            </div>
-          </div>
-        )}
+        {isLoading && !streamingText && <LoadingIndicator />}
 
         <div ref={chatEndRef} />
       </div>

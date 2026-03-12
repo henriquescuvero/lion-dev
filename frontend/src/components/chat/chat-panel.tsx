@@ -8,11 +8,12 @@ import type { Project } from '@/hooks/use-projects'
 
 interface ChatPanelProps {
   project: Project | null
-  updateProject: (id: string, updates: Partial<Pick<Project, 'model'>>) => Promise<void>
+  createProject: (name: string) => Promise<Project | null>
+  updateProject: (id: string, updates: Partial<Pick<Project, 'model' | 'current_template'>>) => Promise<void>
 }
 
-export function ChatPanel({ project, updateProject }: ChatPanelProps) {
-  const { messages, messagesLoading, sendMessage } = useChat(project)
+export function ChatPanel({ project, createProject, updateProject }: ChatPanelProps) {
+  const { messages, messagesLoading, sendMessage } = useChat(project, { createProject, updateProject })
   const { isLoading, streamingText } = useAppStore()
   const chatEndRef = useRef<HTMLDivElement>(null)
 

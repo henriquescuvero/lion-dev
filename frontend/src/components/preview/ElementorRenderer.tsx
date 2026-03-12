@@ -6,13 +6,15 @@ interface ElementorRendererProps {
   elements: ElementorElement[]
   editMode?: boolean
   onTextEdit?: (elementId: string, field: string, value: string) => void
+  selectedElementId?: string | null
+  onElementSelect?: (id: string) => void
 }
 
-export function ElementorRenderer({ elements, editMode, onTextEdit }: ElementorRendererProps) {
+export function ElementorRenderer({ elements, editMode, onTextEdit, selectedElementId, onElementSelect }: ElementorRendererProps) {
   return (
     <>
       {elements.map((el) => (
-        <RenderElement key={el.id} element={el} editMode={editMode} onTextEdit={onTextEdit} />
+        <RenderElement key={el.id} element={el} editMode={editMode} onTextEdit={onTextEdit} selectedElementId={selectedElementId} onElementSelect={onElementSelect} />
       ))}
     </>
   )
@@ -22,19 +24,40 @@ function RenderElement({
   element,
   editMode,
   onTextEdit,
+  selectedElementId,
+  onElementSelect,
 }: {
   element: ElementorElement
   editMode?: boolean
   onTextEdit?: (elementId: string, field: string, value: string) => void
+  selectedElementId?: string | null
+  onElementSelect?: (id: string) => void
 }) {
+  const isSelected = selectedElementId === element.id
+  const handleSelect = editMode && onElementSelect ? (e: React.MouseEvent) => { e.stopPropagation(); onElementSelect(element.id) } : undefined
+  const selectStyle: React.CSSProperties = isSelected ? { outline: '2px solid hsl(43 96% 56%)', outlineOffset: '2px' } : {}
+  const hoverClass = editMode ? 'elementor-editable' : ''
+
   if (element.elType === 'container' || element.elType === 'section') {
-    return <RenderContainer element={element} editMode={editMode} onTextEdit={onTextEdit} />
+    return (
+      <div data-element-id={element.id} onClick={handleSelect} style={selectStyle} className={hoverClass}>
+        <RenderContainer element={element} editMode={editMode} onTextEdit={onTextEdit} selectedElementId={selectedElementId} onElementSelect={onElementSelect} />
+      </div>
+    )
   }
   if (element.elType === 'column') {
-    return <RenderContainer element={element} editMode={editMode} onTextEdit={onTextEdit} />
+    return (
+      <div data-element-id={element.id} onClick={handleSelect} style={selectStyle} className={hoverClass}>
+        <RenderContainer element={element} editMode={editMode} onTextEdit={onTextEdit} selectedElementId={selectedElementId} onElementSelect={onElementSelect} />
+      </div>
+    )
   }
   if (element.elType === 'widget') {
-    return <RenderWidget element={element} editMode={editMode} onTextEdit={onTextEdit} />
+    return (
+      <div data-element-id={element.id} onClick={handleSelect} style={selectStyle} className={hoverClass}>
+        <RenderWidget element={element} editMode={editMode} onTextEdit={onTextEdit} />
+      </div>
+    )
   }
   return null
 }
@@ -132,17 +155,21 @@ function RenderContainer({
   element,
   editMode,
   onTextEdit,
+  selectedElementId,
+  onElementSelect,
 }: {
   element: ElementorElement
   editMode?: boolean
   onTextEdit?: (elementId: string, field: string, value: string) => void
+  selectedElementId?: string | null
+  onElementSelect?: (id: string) => void
 }) {
   const style = getContainerStyle(element.settings)
 
   return (
     <div style={style}>
       {element.elements.map((child) => (
-        <RenderElement key={child.id} element={child} editMode={editMode} onTextEdit={onTextEdit} />
+        <RenderElement key={child.id} element={child} editMode={editMode} onTextEdit={onTextEdit} selectedElementId={selectedElementId} onElementSelect={onElementSelect} />
       ))}
     </div>
   )

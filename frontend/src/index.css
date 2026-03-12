@@ -59,3 +59,29 @@ body {
 .animate-pulse-glow {
   animation: pulse-glow 1.5s ease-in-out infinite;
 }
+
+.elementor-editable {
+  cursor: pointer;
+  transition: outline 0.15s ease;
+}
+
+.elementor-editable:hover {
+  outline: 1px dashed hsl(43 96% 56% / 0.5);
+  outline-offset: 2px;
+}
+
+.field-input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid hsl(220 15% 20%);
+  background-color: hsl(220 20% 7%);
+  color: hsl(220 10% 93%);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.field-input:focus {
+  border-color: hsl(43 96% 56% / 0.5);
+}

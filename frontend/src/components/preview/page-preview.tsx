@@ -1,6 +1,8 @@
-import { Monitor, Smartphone, Tablet, MousePointer2 } from 'lucide-react'
+import { useState, useCallback } from 'react'
+import { Monitor, Smartphone, Tablet, MousePointer2, Download } from 'lucide-react'
 import { useAppStore } from '@/stores/app-store'
 import { ElementorRenderer } from './ElementorRenderer'
+import { ElementEditor } from './element-editor'
 import type { Project } from '@/hooks/use-projects'
 import type { ElementorTemplate, ElementorElement } from '@/types/elementor'
 
@@ -12,20 +14,9 @@ interface PagePreviewProps {
 export function PagePreview({ project, onPageUpdate }: PagePreviewProps) {
   const { viewMode, setViewMode, editMode, toggleEditMode } = useAppStore()
   const page = project?.current_template as ElementorTemplate | null
+  const [selectedElementId, setSelectedElementId] = useState<string | null>(null)
 
-  if (!page) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-text-muted">
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-2xl bg-bg-tertiary border border-border flex items-center justify-center mx-auto mb-4">
-            <Monitor size={28} className="text-text-muted" />
-          </div>
-          <p className="text-sm">O preview aparecerá aqui</p>
-          <p className="text-xs mt-1">Envie um prompt no chat para gerar uma página</p>
-        </div>
-      </div>
-    )
-  }
+  const selectedElement = selectedElementId && page ? findElement(page.content, selectedElementId) : null
 
   function handleTextEdit(elementId: string, field: string, value: string) {
     if (!page) return
@@ -43,57 +34,134 @@ export function PagePreview({ project, onPageUpdate }: PagePreviewProps) {
     onPageUpdate({ ...page, content: updateElement(page.content) })
   }
 
+  const handleElementClick = useCallback((e: React.MouseEvent) => {
+    if (!editMode) return
+
+    const target = e.target as HTMLElement
+    const elementWrapper = target.closest('[data-element-id]')
+    if (elementWrapper) {
+      e.stopPropagation()
+      const id = elementWrapper.getAttribute('data-element-id')
+      setSelectedElementId(id)
+    }
+  }, [editMode])
+
+  function handleExport() {
+    if (!page) return
+    const blob = new Blob([JSON.stringify(page, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${page.title || 'template'}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  if (!page) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-text-muted">
+        <div className="text-center">
+          <div className="w-16 h-16 rounded-2xl bg-bg-tertiary border border-border flex items-center justify-center mx-auto mb-4">
+            <Monitor size={28} className="text-text-muted" />
+          </div>
+          <p className="text-sm">O preview aparecerá aqui</p>
+          <p className="text-xs mt-1">Envie um prompt no chat para gerar uma página</p>
+        </div>
+      </div>
+    )
+  }
+
   const widthMap = { desktop: '100%', tablet: '768px', mobile: '375px' }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-bg-secondary/30">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-text-muted">Preview:</span>
-          <span className="text-xs font-medium text-text-primary">{page.title}</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
-            Elementor
-          </span>
+    <div className="flex h-full">
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-bg-secondary/30">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-text-muted">Preview:</span>
+            <span className="text-xs font-medium text-text-primary">{page.title}</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+              Elementor
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleExport}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-border text-text-muted hover:text-text-secondary hover:border-primary/20 transition-all"
+              title="Exportar JSON"
+            >
+              <Download size={13} />
+              <span>Exportar</span>
+            </button>
+            <button
+              onClick={() => {
+                toggleEditMode()
+                if (editMode) setSelectedElementId(null)
+              }}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-all ${
+                editMode
+                  ? 'bg-primary/10 border-primary/40 text-primary'
+                  : 'border-border text-text-muted hover:text-text-secondary hover:border-primary/20'
+              }`}
+            >
+              <MousePointer2 size={13} />
+              <span>{editMode ? 'Editando' : 'Editar'}</span>
+            </button>
+            <div className="flex items-center gap-1 bg-bg-primary rounded-lg p-0.5 border border-border">
+              {([
+                { mode: 'desktop' as const, icon: Monitor },
+                { mode: 'tablet' as const, icon: Tablet },
+                { mode: 'mobile' as const, icon: Smartphone },
+              ]).map(({ mode, icon: Icon }) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`p-1.5 rounded-md transition-all ${
+                    viewMode === mode ? 'bg-bg-tertiary text-primary' : 'text-text-muted hover:text-text-secondary'
+                  }`}
+                >
+                  <Icon size={14} />
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={toggleEditMode}
-            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-all ${
-              editMode
-                ? 'bg-primary/10 border-primary/40 text-primary'
-                : 'border-border text-text-muted hover:text-text-secondary hover:border-primary/20'
-            }`}
+        <div className="flex-1 overflow-y-auto bg-bg-primary/50 p-4" onClick={handleElementClick}>
+          <div
+            className="mx-auto bg-bg-primary rounded-lg border border-border overflow-hidden shadow-xl transition-all duration-300 animate-slide-up"
+            style={{ maxWidth: widthMap[viewMode], color: '#e0e0e0' }}
           >
-            <MousePointer2 size={13} />
-            <span>{editMode ? 'Editando' : 'Editar'}</span>
-          </button>
-          <div className="flex items-center gap-1 bg-bg-primary rounded-lg p-0.5 border border-border">
-            {([
-              { mode: 'desktop' as const, icon: Monitor },
-              { mode: 'tablet' as const, icon: Tablet },
-              { mode: 'mobile' as const, icon: Smartphone },
-            ]).map(({ mode, icon: Icon }) => (
-              <button
-                key={mode}
-                onClick={() => setViewMode(mode)}
-                className={`p-1.5 rounded-md transition-all ${
-                  viewMode === mode ? 'bg-bg-tertiary text-primary' : 'text-text-muted hover:text-text-secondary'
-                }`}
-              >
-                <Icon size={14} />
-              </button>
-            ))}
+            <ElementorRenderer
+              elements={page.content}
+              editMode={editMode}
+              onTextEdit={handleTextEdit}
+              selectedElementId={selectedElementId}
+              onElementSelect={editMode ? setSelectedElementId : undefined}
+            />
           </div>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto bg-bg-primary/50 p-4">
-        <div
-          className="mx-auto bg-bg-primary rounded-lg border border-border overflow-hidden shadow-xl transition-all duration-300 animate-slide-up"
-          style={{ maxWidth: widthMap[viewMode], color: '#e0e0e0' }}
-        >
-          <ElementorRenderer elements={page.content} editMode={editMode} onTextEdit={handleTextEdit} />
-        </div>
-      </div>
+
+      {/* Editor Panel */}
+      {editMode && selectedElement && page && (
+        <ElementEditor
+          element={selectedElement}
+          template={page}
+          onUpdate={onPageUpdate}
+          onClose={() => setSelectedElementId(null)}
+        />
+      )}
     </div>
   )
+}
+
+function findElement(elements: ElementorElement[], id: string): ElementorElement | null {
+  for (const el of elements) {
+    if (el.id === id) return el
+    if (el.elements.length > 0) {
+      const found = findElement(el.elements, id)
+      if (found) return found
+    }
+  }
+  return null
 }

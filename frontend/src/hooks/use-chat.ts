@@ -1,17 +1,21 @@
 import { useAppStore } from '@/stores/app-store'
 import { useMessages } from './use-messages'
-import { useProjects, type Project } from './use-projects'
 import { useTemplateVersions } from './use-template'
 import { sendChatMessage, extractJsonFromResponse, extractTextFromResponse, DEFAULT_SYSTEM_PROMPT } from '@/services/ai'
 import { generateChunked, shouldUseChunkedGeneration } from '@/services/chunked-generation'
 import { generateId } from '@/lib/utils'
 import type { ElementorTemplate } from '@/types/elementor'
 import type { Message } from './use-messages'
+import type { Project } from './use-projects'
 
-export function useChat(project: Project | null) {
+interface UseChatDeps {
+  createProject: (name: string) => Promise<Project | null>
+  updateProject: (id: string, updates: Partial<Pick<Project, 'current_template'>>) => Promise<void>
+}
+
+export function useChat(project: Project | null, deps: UseChatDeps) {
   const projectId = project?.id ?? null
   const { messages, loading: messagesLoading, addMessage, addLocalMessage, clearMessages, refetch: refetchMessages } = useMessages(projectId)
-  const { updateProject, createProject } = useProjects()
   const { saveVersion } = useTemplateVersions(projectId)
   const { setIsLoading, setStreamingText } = useAppStore()
 
@@ -22,7 +26,7 @@ export function useChat(project: Project | null) {
     // Auto-create project if none
     if (!currentProjectId) {
       const name = content.substring(0, 40) + (content.length > 40 ? '...' : '')
-      currentProject = await createProject(name)
+      currentProject = await deps.createProject(name)
       if (!currentProject) return
       currentProjectId = currentProject.id
     }
@@ -127,7 +131,6 @@ export function useChat(project: Project | null) {
         }
       } else {
         // === SINGLE GENERATION (small changes, image-based, etc.) ===
-        // Inject current template context if exists
         if (currentTemplate && !allMessages.some((m) => m.role === 'ai' && m.template_json)) {
           apiMessages.splice(Math.max(0, apiMessages.length - 1), 0, {
             role: 'assistant',
@@ -159,13 +162,12 @@ export function useChat(project: Project | null) {
         template_json: json,
       })
 
-      // Update project template
+      // Update project template — uses the SAME updateProject from AppLayout
       if (json && currentProjectId) {
-        await updateProject(currentProjectId, { current_template: json })
+        await deps.updateProject(currentProjectId, { current_template: json })
         await saveVersion(json)
       }
 
-      // Add to local state
       if (aiMsg) {
         addLocalMessage({
           ...aiMsg,

@@ -30,7 +30,7 @@ export function AppLayout() {
           onDeleteProject={deleteProject}
         />
 
-        <ChatPanel project={activeProject} updateProject={updateProject} />
+        <ChatPanel project={activeProject} createProject={createProject} updateProject={updateProject} />
 
         <div className="flex-1 flex flex-col min-w-0">
           <PagePreview

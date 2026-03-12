@@ -3,6 +3,7 @@ import { useMessages } from './use-messages'
 import { useProjects, type Project } from './use-projects'
 import { useTemplateVersions } from './use-template'
 import { sendChatMessage, extractJsonFromResponse, extractTextFromResponse, DEFAULT_SYSTEM_PROMPT } from '@/services/ai'
+import { generateChunked, shouldUseChunkedGeneration } from '@/services/chunked-generation'
 import { generateId } from '@/lib/utils'
 import type { ElementorTemplate } from '@/types/elementor'
 import type { Message } from './use-messages'
@@ -48,7 +49,7 @@ export function useChat(project: Project | null) {
     })
 
     try {
-      // Build API messages
+      // Build API messages for context
       const apiMessages: Array<{
         role: 'user' | 'assistant'
         content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>
@@ -79,34 +80,82 @@ export function useChat(project: Project | null) {
         }
       }
 
-      // Inject current template context if exists
       const currentTemplate = currentProject?.current_template
-      if (currentTemplate && !allMessages.some((m) => m.role === 'ai' && m.template_json)) {
-        apiMessages.splice(Math.max(0, apiMessages.length - 1), 0, {
-          role: 'assistant',
-          content: 'Template atual da página:\n\n```json\n' + JSON.stringify(currentTemplate, null, 2) + '\n```',
-        })
+      const systemPrompt = currentProject?.system_prompt || DEFAULT_SYSTEM_PROMPT
+      const hasImages = images && images.length > 0
+      const useChunked = !hasImages && shouldUseChunkedGeneration(content, !!currentTemplate)
+
+      let json: ElementorTemplate | null = null
+      let text: string = ''
+
+      if (useChunked) {
+        // === CHUNKED GENERATION (section by section) ===
+        setStreamingText('🔍 Analisando requisitos e planejando seções...')
+
+        const result = await generateChunked(
+          content,
+          apiMessages,
+          currentProject?.model || 'claude-sonnet-4-5-20250929',
+          currentProject?.system_prompt || null,
+          currentTemplate as Record<string, unknown> | null,
+          {
+            onPlanReady: (sections) => {
+              setStreamingText(`📋 Plano: ${sections.length} seções → ${sections.join(', ')}`)
+            },
+            onSectionStart: (i, total, name) => {
+              setStreamingText(`🏗️ Gerando seção ${i + 1}/${total}: ${name}...`)
+            },
+            onSectionStream: (i, total, name, streamText) => {
+              const preview = streamText.length > 200 ? streamText.substring(streamText.length - 200) : streamText
+              setStreamingText(`🏗️ Seção ${i + 1}/${total}: ${name}\n\n${preview}`)
+            },
+            onSectionComplete: (i, total, name) => {
+              setStreamingText(`✅ Seção ${i + 1}/${total} concluída: ${name}`)
+            },
+            onAssembling: () => {
+              setStreamingText('📦 Montando template completo...')
+            },
+            onError: (error) => {
+              setStreamingText(`❌ ${error}`)
+            },
+          }
+        )
+
+        if (result) {
+          json = result.template as unknown as ElementorTemplate
+          text = result.explanation
+        }
+      } else {
+        // === SINGLE GENERATION (small changes, image-based, etc.) ===
+        // Inject current template context if exists
+        if (currentTemplate && !allMessages.some((m) => m.role === 'ai' && m.template_json)) {
+          apiMessages.splice(Math.max(0, apiMessages.length - 1), 0, {
+            role: 'assistant',
+            content: 'Template atual da página:\n\n```json\n' + JSON.stringify(currentTemplate, null, 2) + '\n```',
+          })
+        }
+
+        const fullResponse = await sendChatMessage(
+          apiMessages,
+          currentProject?.model || 'claude-sonnet-4-5-20250929',
+          systemPrompt,
+          (partial) => setStreamingText(partial),
+          (status) => setStreamingText('⚡ ' + status)
+        )
+
+        json = extractJsonFromResponse(fullResponse) as ElementorTemplate | null
+        text = extractTextFromResponse(fullResponse)
+
+        if (!text && !json) text = fullResponse
       }
 
-      const systemPrompt = currentProject?.system_prompt || DEFAULT_SYSTEM_PROMPT
-      const fullResponse = await sendChatMessage(
-        apiMessages,
-        currentProject?.model || 'claude-sonnet-4-5-20250929',
-        systemPrompt,
-        (partial) => setStreamingText(partial),
-        (status) => setStreamingText('⚡ ' + status)
-      )
-
       setStreamingText(null)
-
-      const json = extractJsonFromResponse(fullResponse) as ElementorTemplate | null
-      const text = extractTextFromResponse(fullResponse)
 
       // Save AI message
       const aiMsg = await addMessage({
         project_id: currentProjectId,
         role: 'ai',
-        content: text || (json ? 'Template gerado com sucesso!' : fullResponse),
+        content: text || (json ? 'Template gerado com sucesso!' : 'Não foi possível gerar o template.'),
         template_json: json,
       })
 
@@ -116,7 +165,7 @@ export function useChat(project: Project | null) {
         await saveVersion(json)
       }
 
-      // Refetch to sync with DB
+      // Add to local state
       if (aiMsg) {
         addLocalMessage({
           ...aiMsg,
@@ -124,6 +173,7 @@ export function useChat(project: Project | null) {
         })
       }
     } catch (error) {
+      setStreamingText(null)
       addLocalMessage({
         id: generateId(),
         project_id: currentProjectId,

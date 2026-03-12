@@ -93,7 +93,8 @@ export function useChat(project: Project | null) {
         apiMessages,
         currentProject?.model || 'claude-sonnet-4-5-20250929',
         systemPrompt,
-        (partial) => setStreamingText(partial)
+        (partial) => setStreamingText(partial),
+        (status) => setStreamingText('⚡ ' + status)
       )
 
       setStreamingText(null)

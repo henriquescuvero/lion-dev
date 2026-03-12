@@ -1,18 +1,4 @@
-const API_KEY = 'sk-cliproxy-2024-secure'
-const BASE_URL = 'https://claude-api-proxy.st3er3.easypanel.host/v1'
-
-export const AVAILABLE_MODELS = [
-  { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', description: 'Recomendado' },
-  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', description: 'Mais recente' },
-  { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', description: 'Rápido' },
-  { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', description: 'Mais inteligente' },
-  { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', description: 'Avançado' },
-  { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', description: 'Ultra rápido' },
-] as const
-
-export const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929'
-
-const PROMPT_STORAGE_KEY = 'liondev-system-prompt'
+import { API_KEY, API_BASE_URL } from '@/lib/constants'
 
 export const DEFAULT_SYSTEM_PROMPT = `Você é o Lion Dev, um assistente especializado em criar templates de páginas WordPress 100% compatíveis com o plugin Elementor.
 
@@ -96,23 +82,6 @@ IMPORTANTE: Mesmo para pequenas alterações, retorne o JSON COMPLETO da página
 ## Ícones FontAwesome Disponíveis
 fas fa-rocket, fas fa-shield-alt, fas fa-chart-line, fas fa-headphones, fas fa-palette, fas fa-chart-bar, fas fa-star, fas fa-check, fas fa-heart, fas fa-bolt, fas fa-globe, fas fa-users, fas fa-cog, fas fa-envelope, fas fa-phone, fas fa-map-marker-alt, fas fa-clock, fas fa-award, fas fa-thumbs-up, fas fa-lightbulb`
 
-export function loadSystemPrompt(): string {
-  try {
-    const saved = localStorage.getItem(PROMPT_STORAGE_KEY)
-    return saved ?? DEFAULT_SYSTEM_PROMPT
-  } catch {
-    return DEFAULT_SYSTEM_PROMPT
-  }
-}
-
-export function saveSystemPrompt(prompt: string): void {
-  localStorage.setItem(PROMPT_STORAGE_KEY, prompt)
-}
-
-export function resetSystemPrompt(): void {
-  localStorage.removeItem(PROMPT_STORAGE_KEY)
-}
-
 interface ChatMessagePayload {
   role: 'system' | 'user' | 'assistant'
   content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>
@@ -120,13 +89,11 @@ interface ChatMessagePayload {
 
 export async function sendChatMessage(
   messages: ChatMessagePayload[],
-  model: string = DEFAULT_MODEL,
-  systemPrompt?: string,
+  model: string,
+  systemPrompt: string,
   onChunk?: (text: string) => void
 ): Promise<string> {
-  const prompt = systemPrompt ?? loadSystemPrompt()
-
-  const response = await fetch(`${BASE_URL}/chat/completions`, {
+  const response = await fetch(`${API_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -134,7 +101,7 @@ export async function sendChatMessage(
     },
     body: JSON.stringify({
       model,
-      messages: [{ role: 'system', content: prompt }, ...messages],
+      messages: [{ role: 'system', content: systemPrompt }, ...messages],
       max_tokens: 16384,
       stream: !!onChunk,
     }),
@@ -157,7 +124,7 @@ export async function sendChatMessage(
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
-      buffer = lines.pop() || '' // keep incomplete last line for next chunk
+      buffer = lines.pop() || ''
 
       for (const line of lines) {
         const trimmed = line.trim()
@@ -178,19 +145,14 @@ export async function sendChatMessage(
       }
     }
 
-    // Process any remaining buffer
     if (buffer.trim().startsWith('data: ')) {
       const data = buffer.trim().slice(6)
       if (data !== '[DONE]') {
         try {
           const parsed = JSON.parse(data)
           const content = parsed.choices?.[0]?.delta?.content
-          if (content) {
-            fullText += content
-          }
-        } catch {
-          // skip
-        }
+          if (content) fullText += content
+        } catch { /* skip */ }
       }
     }
 
@@ -206,9 +168,7 @@ export function extractJsonFromResponse(text: string): Record<string, unknown> |
   if (jsonMatch) {
     try {
       return JSON.parse(jsonMatch[1].trim())
-    } catch {
-      // malformed
-    }
+    } catch { /* malformed */ }
   }
 
   const codeMatch = text.match(/```\s*([\s\S]*?)```/)
@@ -216,9 +176,7 @@ export function extractJsonFromResponse(text: string): Record<string, unknown> |
     try {
       const parsed = JSON.parse(codeMatch[1].trim())
       if (parsed && typeof parsed === 'object') return parsed
-    } catch {
-      // not json
-    }
+    } catch { /* not json */ }
   }
 
   try {
@@ -226,11 +184,9 @@ export function extractJsonFromResponse(text: string): Record<string, unknown> |
     const endIdx = text.lastIndexOf('}')
     if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
       const parsed = JSON.parse(text.substring(startIdx, endIdx + 1))
-      if (parsed && (parsed.content || parsed.title || parsed.sections)) return parsed
+      if (parsed && (parsed.content || parsed.title)) return parsed
     }
-  } catch {
-    // not valid
-  }
+  } catch { /* not valid */ }
 
   return null
 }
@@ -240,13 +196,4 @@ export function extractTextFromResponse(text: string): string {
     .replace(/```json\s*[\s\S]*?```/g, '')
     .replace(/```\s*[\s\S]*?```/g, '')
     .trim()
-}
-
-export function imageToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
 }

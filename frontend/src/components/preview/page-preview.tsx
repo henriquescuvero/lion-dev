@@ -1,19 +1,17 @@
 import { Monitor, Smartphone, Tablet, MousePointer2 } from 'lucide-react'
-import { useState } from 'react'
-import type { ElementorTemplate, ElementorElement } from '../../types'
+import { useAppStore } from '@/stores/app-store'
 import { ElementorRenderer } from './ElementorRenderer'
+import type { Project } from '@/hooks/use-projects'
+import type { ElementorTemplate, ElementorElement } from '@/types/elementor'
 
 interface PagePreviewProps {
-  page: ElementorTemplate | null
-  editMode: boolean
-  onToggleEditMode: () => void
+  project: Project | null
   onPageUpdate: (page: ElementorTemplate) => void
 }
 
-type ViewMode = 'desktop' | 'tablet' | 'mobile'
-
-export function PagePreview({ page, editMode, onToggleEditMode, onPageUpdate }: PagePreviewProps) {
-  const [viewMode, setViewMode] = useState<ViewMode>('desktop')
+export function PagePreview({ project, onPageUpdate }: PagePreviewProps) {
+  const { viewMode, setViewMode, editMode, toggleEditMode } = useAppStore()
+  const page = project?.current_template as ElementorTemplate | null
 
   if (!page) {
     return (
@@ -22,8 +20,8 @@ export function PagePreview({ page, editMode, onToggleEditMode, onPageUpdate }: 
           <div className="w-16 h-16 rounded-2xl bg-bg-tertiary border border-border flex items-center justify-center mx-auto mb-4">
             <Monitor size={28} className="text-text-muted" />
           </div>
-          <p className="text-sm">O preview aparecera aqui</p>
-          <p className="text-xs mt-1">Envie um prompt no chat para gerar uma pagina</p>
+          <p className="text-sm">O preview aparecerá aqui</p>
+          <p className="text-xs mt-1">Envie um prompt no chat para gerar uma página</p>
         </div>
       </div>
     )
@@ -31,7 +29,6 @@ export function PagePreview({ page, editMode, onToggleEditMode, onPageUpdate }: 
 
   function handleTextEdit(elementId: string, field: string, value: string) {
     if (!page) return
-
     function updateElement(elements: ElementorElement[]): ElementorElement[] {
       return elements.map((el) => {
         if (el.id === elementId) {
@@ -43,15 +40,10 @@ export function PagePreview({ page, editMode, onToggleEditMode, onPageUpdate }: 
         return el
       })
     }
-
     onPageUpdate({ ...page, content: updateElement(page.content) })
   }
 
-  const widthMap: Record<ViewMode, string> = {
-    desktop: '100%',
-    tablet: '768px',
-    mobile: '375px',
-  }
+  const widthMap = { desktop: '100%', tablet: '768px', mobile: '375px' }
 
   return (
     <div className="flex flex-col h-full">
@@ -59,19 +51,18 @@ export function PagePreview({ page, editMode, onToggleEditMode, onPageUpdate }: 
         <div className="flex items-center gap-2">
           <span className="text-xs text-text-muted">Preview:</span>
           <span className="text-xs font-medium text-text-primary">{page.title}</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/10 text-accent border border-accent/20">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
             Elementor
           </span>
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={onToggleEditMode}
+            onClick={toggleEditMode}
             className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-all ${
               editMode
-                ? 'bg-accent/10 border-accent/40 text-accent'
-                : 'border-border text-text-muted hover:text-text-secondary hover:border-accent/20'
+                ? 'bg-primary/10 border-primary/40 text-primary'
+                : 'border-border text-text-muted hover:text-text-secondary hover:border-primary/20'
             }`}
-            title={editMode ? 'Desativar edição' : 'Ativar edição visual'}
           >
             <MousePointer2 size={13} />
             <span>{editMode ? 'Editando' : 'Editar'}</span>
@@ -86,9 +77,7 @@ export function PagePreview({ page, editMode, onToggleEditMode, onPageUpdate }: 
                 key={mode}
                 onClick={() => setViewMode(mode)}
                 className={`p-1.5 rounded-md transition-all ${
-                  viewMode === mode
-                    ? 'bg-bg-tertiary text-accent'
-                    : 'text-text-muted hover:text-text-secondary'
+                  viewMode === mode ? 'bg-bg-tertiary text-primary' : 'text-text-muted hover:text-text-secondary'
                 }`}
               >
                 <Icon size={14} />
@@ -102,11 +91,7 @@ export function PagePreview({ page, editMode, onToggleEditMode, onPageUpdate }: 
           className="mx-auto bg-bg-primary rounded-lg border border-border overflow-hidden shadow-xl transition-all duration-300 animate-slide-up"
           style={{ maxWidth: widthMap[viewMode], color: '#e0e0e0' }}
         >
-          <ElementorRenderer
-            elements={page.content}
-            editMode={editMode}
-            onTextEdit={handleTextEdit}
-          />
+          <ElementorRenderer elements={page.content} editMode={editMode} onTextEdit={handleTextEdit} />
         </div>
       </div>
     </div>

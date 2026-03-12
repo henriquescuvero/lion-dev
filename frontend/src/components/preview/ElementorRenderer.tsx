@@ -1,6 +1,6 @@
 import { Star, ChevronDown } from 'lucide-react'
 import { useState } from 'react'
-import type { ElementorElement } from '../../types'
+import type { ElementorElement } from '@/types/elementor'
 
 interface ElementorRendererProps {
   elements: ElementorElement[]

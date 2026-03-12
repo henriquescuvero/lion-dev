@@ -1,4 +1,3 @@
-// Elementor Template Format (v0.4)
 export interface ElementorTemplate {
   title: string
   type: string
@@ -14,13 +13,4 @@ export interface ElementorElement {
   isInner: boolean
   settings: Record<string, unknown>
   elements: ElementorElement[]
-}
-
-export interface ChatMessage {
-  id: string
-  role: 'user' | 'ai'
-  content: string
-  json?: ElementorTemplate
-  images?: string[]
-  timestamp: Date
 }

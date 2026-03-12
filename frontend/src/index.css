@@ -4,6 +4,9 @@
   --color-bg-primary: hsl(220 20% 7%);
   --color-bg-secondary: hsl(220 18% 11%);
   --color-bg-tertiary: hsl(220 16% 15%);
+  --color-primary: hsl(43 96% 56%);
+  --color-primary-hover: hsl(43 96% 64%);
+  --color-primary-dim: hsl(43 60% 40%);
   --color-accent: hsl(43 96% 56%);
   --color-accent-hover: hsl(43 96% 64%);
   --color-accent-dim: hsl(43 60% 40%);

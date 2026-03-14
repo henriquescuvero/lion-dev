@@ -13,7 +13,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ project, createProject, updateProject }: ChatPanelProps) {
-  const { messages, messagesLoading, sendMessage } = useChat(project, { createProject, updateProject })
+  const { messages, messagesLoading, sendMessage, cancelGeneration } = useChat(project, { createProject, updateProject })
   const { isLoading, streamingText } = useAppStore()
   const chatEndRef = useRef<HTMLDivElement>(null)
 
@@ -59,7 +59,9 @@ export function ChatPanel({ project, createProject, updateProject }: ChatPanelPr
 
       <ChatInput
         onSend={sendMessage}
+        onCancel={cancelGeneration}
         disabled={isLoading}
+        isGenerating={isLoading}
         model={project?.model || 'claude-sonnet-4-5-20250929'}
         onModelChange={(model) => {
           if (project) updateProject(project.id, { model })

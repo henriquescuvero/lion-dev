@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { X, Trash2, Copy, ChevronUp, ChevronDown, AlignLeft, AlignCenter, AlignRight } from 'lucide-react'
 import type { ElementorElement, ElementorTemplate } from '@/types/elementor'
 import { generateId } from '@/lib/utils'
+import { sanitizeUrl } from '@/lib/sanitize'
+import { toast } from '@/stores/toast-store'
 
 interface ElementEditorProps {
   element: ElementorElement
@@ -28,12 +30,14 @@ export function ElementEditor({ element, template, onUpdate, onClose }: ElementE
     const updated = removeElementFromTemplate(template, element.id)
     onUpdate(updated)
     onClose()
+    toast.info('Elemento excluído')
   }
 
   function duplicateElement() {
     const cloned = cloneElement(element)
     const updated = insertAfterElement(template, element.id, cloned)
     onUpdate(updated)
+    toast.success('Elemento duplicado')
   }
 
   function moveElement(direction: 'up' | 'down') {
@@ -490,8 +494,9 @@ function renderContentFields(
             <input
               type="text"
               value={((s.link as Record<string, unknown>)?.url as string) || '#'}
-              onChange={(e) => updateSetting('link', { ...((s.link as Record<string, unknown>) || {}), url: e.target.value })}
+              onChange={(e) => updateSetting('link', { ...((s.link as Record<string, unknown>) || {}), url: sanitizeUrl(e.target.value) })}
               className="field-input"
+              placeholder="https://..."
             />
           </FieldGroup>
         </>

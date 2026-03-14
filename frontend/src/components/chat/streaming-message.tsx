@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 const GENERATION_STEPS = [
   { label: 'Analisando requisitos', icon: '🔍', duration: 3000 },
@@ -11,25 +11,23 @@ const GENERATION_STEPS = [
 ]
 
 function useProgressSteps(isActive: boolean) {
-  const [currentStep, setCurrentStep] = useState(0)
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
     if (!isActive) return
-    const interval = setInterval(() => setElapsed((e) => e + 100), 100)
+    const interval = setInterval(() => {
+      setElapsed((e) => e + 100)
+    }, 100)
     return () => clearInterval(interval)
   }, [isActive])
 
-  useEffect(() => {
+  const currentStep = useMemo(() => {
     let total = 0
     for (let i = 0; i < GENERATION_STEPS.length; i++) {
       total += GENERATION_STEPS[i].duration
-      if (elapsed < total) {
-        setCurrentStep(i)
-        return
-      }
+      if (elapsed < total) return i
     }
-    setCurrentStep(GENERATION_STEPS.length - 1)
+    return GENERATION_STEPS.length - 1
   }, [elapsed])
 
   const stepProgress = useMemo(() => {
@@ -116,14 +114,18 @@ function parseChunkedStatus(text: string): {
 export function StreamingMessage({ text }: { text: string }) {
   const hasText = text.length > 0
   const chunkedStatus = parseChunkedStatus(text)
+  const isChunked = !!chunkedStatus?.isChunked
+
+  // Hook must be called unconditionally
+  const progressData = useProgressSteps(!isChunked)
 
   // If chunked generation, show section-based progress
-  if (chunkedStatus?.isChunked) {
-    return <ChunkedProgress status={chunkedStatus} rawText={text} />
+  if (isChunked) {
+    return <ChunkedProgress status={chunkedStatus!} rawText={text} />
   }
 
   // Default: streaming text with animated steps
-  const { overallProgress, steps, currentStep } = useProgressSteps(true)
+  const { overallProgress, steps, currentStep } = progressData
 
   return (
     <div className="flex items-start gap-3 px-4 py-3 animate-fade-in">

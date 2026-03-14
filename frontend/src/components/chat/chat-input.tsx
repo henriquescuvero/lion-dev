@@ -1,16 +1,23 @@
 import { useState, useRef, useEffect } from 'react'
-import { SendHorizontal, ImagePlus, ChevronDown, X } from 'lucide-react'
+import { SendHorizontal, ImagePlus, ChevronDown, X, Square } from 'lucide-react'
 import { AVAILABLE_MODELS } from '@/lib/constants'
 import { imageToBase64 } from '@/services/storage'
+import { toast } from '@/stores/toast-store'
+
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
+const MAX_IMAGES = 5
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 
 interface ChatInputProps {
   onSend: (message: string, images?: string[]) => void
+  onCancel?: () => void
   disabled?: boolean
+  isGenerating?: boolean
   model: string
   onModelChange: (model: string) => void
 }
 
-export function ChatInput({ onSend, disabled, model, onModelChange }: ChatInputProps) {
+export function ChatInput({ onSend, onCancel, disabled, isGenerating, model, onModelChange }: ChatInputProps) {
   const [value, setValue] = useState('')
   const [images, setImages] = useState<string[]>([])
   const [showModels, setShowModels] = useState(false)
@@ -23,6 +30,17 @@ export function ChatInput({ onSend, disabled, model, onModelChange }: ChatInputP
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
     }
   }, [value])
+
+  // Close model dropdown when clicking outside
+  useEffect(() => {
+    if (!showModels) return
+    function handleClick(e: MouseEvent) {
+      const target = e.target as HTMLElement
+      if (!target.closest('[data-model-dropdown]')) setShowModels(false)
+    }
+    document.addEventListener('click', handleClick)
+    return () => document.removeEventListener('click', handleClick)
+  }, [showModels])
 
   function handleSubmit() {
     const trimmed = value.trim()
@@ -42,7 +60,26 @@ export function ChatInput({ onSend, disabled, model, onModelChange }: ChatInputP
   async function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
     if (!files) return
+
     for (const file of Array.from(files)) {
+      // Validate type
+      if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+        toast.warning(`Formato não suportado: ${file.name}. Use JPEG, PNG, GIF ou WebP.`)
+        continue
+      }
+
+      // Validate size
+      if (file.size > MAX_IMAGE_SIZE) {
+        toast.warning(`Imagem muito grande: ${file.name} (max ${MAX_IMAGE_SIZE / 1024 / 1024}MB)`)
+        continue
+      }
+
+      // Validate count
+      if (images.length >= MAX_IMAGES) {
+        toast.warning(`Máximo de ${MAX_IMAGES} imagens por mensagem`)
+        break
+      }
+
       const base64 = await imageToBase64(file)
       setImages((prev) => [...prev, base64])
     }
@@ -70,7 +107,7 @@ export function ChatInput({ onSend, disabled, model, onModelChange }: ChatInputP
       )}
 
       <div className="flex items-center gap-2 mb-2">
-        <div className="relative">
+        <div className="relative" data-model-dropdown>
           <button
             onClick={() => setShowModels(!showModels)}
             className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-bg-primary border border-border hover:border-primary/40 text-text-secondary hover:text-text-primary transition-all"
@@ -103,6 +140,7 @@ export function ChatInput({ onSend, disabled, model, onModelChange }: ChatInputP
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled}
           className="m-1.5 p-2 rounded-lg hover:bg-bg-tertiary text-text-muted hover:text-primary disabled:opacity-30 transition-all"
+          title={`Anexar imagem (max ${MAX_IMAGES})`}
         >
           <ImagePlus size={16} />
         </button>
@@ -117,16 +155,27 @@ export function ChatInput({ onSend, disabled, model, onModelChange }: ChatInputP
           rows={1}
           className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted py-3 resize-none outline-none max-h-[120px]"
         />
-        <button
-          onClick={handleSubmit}
-          disabled={(!value.trim() && images.length === 0) || disabled}
-          className="m-1.5 p-2 rounded-lg bg-primary text-bg-primary hover:bg-primary-hover disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 hover:shadow-[0_0_12px_hsla(43,96%,56%,0.3)]"
-        >
-          <SendHorizontal size={16} />
-        </button>
+        {isGenerating ? (
+          <button
+            onClick={onCancel}
+            className="m-1.5 p-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all duration-200"
+            title="Cancelar geração"
+          >
+            <Square size={16} />
+          </button>
+        ) : (
+          <button
+            onClick={handleSubmit}
+            disabled={(!value.trim() && images.length === 0) || disabled}
+            className="m-1.5 p-2 rounded-lg bg-primary text-bg-primary hover:bg-primary-hover disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 hover:shadow-[0_0_12px_hsla(43,96%,56%,0.3)]"
+          >
+            <SendHorizontal size={16} />
+          </button>
+        )}
       </div>
       <p className="text-[10px] text-text-muted mt-2 text-center">
         Enter para enviar, Shift+Enter para nova linha
+        {isGenerating && ' · Clique no botão vermelho para cancelar'}
       </p>
     </div>
   )

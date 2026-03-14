@@ -4,6 +4,8 @@ import { ChatPanel } from '@/components/chat/chat-panel'
 import { PagePreview } from '@/components/preview/page-preview'
 import { PromptModal } from '@/components/modals/prompt-modal'
 import { VersionHistoryModal } from '@/components/modals/version-history-modal'
+import { ToastContainer } from '@/components/ui/toast-container'
+import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { useAppStore } from '@/stores/app-store'
 import { useProjects } from '@/hooks/use-projects'
 
@@ -30,17 +32,21 @@ export function AppLayout() {
           onDeleteProject={deleteProject}
         />
 
-        <ChatPanel project={activeProject} createProject={createProject} updateProject={updateProject} />
+        <ErrorBoundary>
+          <ChatPanel project={activeProject} createProject={createProject} updateProject={updateProject} />
+        </ErrorBoundary>
 
         <div className="flex-1 flex flex-col min-w-0">
-          <PagePreview
-            project={activeProject}
-            onPageUpdate={(template) => {
-              if (activeProject) {
-                updateProject(activeProject.id, { current_template: template })
-              }
-            }}
-          />
+          <ErrorBoundary>
+            <PagePreview
+              project={activeProject}
+              onPageUpdate={(template) => {
+                if (activeProject) {
+                  updateProject(activeProject.id, { current_template: template })
+                }
+              }}
+            />
+          </ErrorBoundary>
         </div>
       </div>
 
@@ -62,6 +68,8 @@ export function AppLayout() {
           }}
         />
       )}
+
+      <ToastContainer />
     </div>
   )
 }

@@ -1,4 +1,8 @@
-export const API_KEY = import.meta.env.VITE_CLAUDE_API_KEY || 'sk-cliproxy-2024-secure'
+const _apiKey = import.meta.env.VITE_CLAUDE_API_KEY
+if (!_apiKey && import.meta.env.PROD) {
+  console.error('[Lion Dev] VITE_CLAUDE_API_KEY não configurada. A geração de templates não funcionará.')
+}
+export const API_KEY = _apiKey || 'sk-cliproxy-2024-secure'
 export const API_BASE_URL = import.meta.env.VITE_CLAUDE_API_URL || 'https://claude-api-proxy.st3er3.easypanel.host/v1'
 
 export const AVAILABLE_MODELS = [

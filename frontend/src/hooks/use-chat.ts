@@ -1,9 +1,11 @@
+import { useRef } from 'react'
 import { useAppStore } from '@/stores/app-store'
 import { useMessages } from './use-messages'
 import { useTemplateVersions } from './use-template'
 import { sendChatMessage, extractJsonFromResponse, extractTextFromResponse, DEFAULT_SYSTEM_PROMPT } from '@/services/ai'
 import { generateChunked, shouldUseChunkedGeneration } from '@/services/chunked-generation'
 import { generateId } from '@/lib/utils'
+import { toast } from '@/stores/toast-store'
 import type { ElementorTemplate } from '@/types/elementor'
 import type { Message } from './use-messages'
 import type { Project } from './use-projects'
@@ -18,6 +20,17 @@ export function useChat(project: Project | null, deps: UseChatDeps) {
   const { messages, loading: messagesLoading, addMessage, addLocalMessage, clearMessages, refetch: refetchMessages } = useMessages(projectId)
   const { saveVersion } = useTemplateVersions(projectId)
   const { setIsLoading, setStreamingText } = useAppStore()
+  const abortRef = useRef<AbortController | null>(null)
+
+  function cancelGeneration() {
+    if (abortRef.current) {
+      abortRef.current.abort()
+      abortRef.current = null
+      setIsLoading(false)
+      setStreamingText(null)
+      toast.info('Geração cancelada')
+    }
+  }
 
   async function sendMessage(content: string, images?: string[]) {
     let currentProjectId = projectId
@@ -44,6 +57,10 @@ export function useChat(project: Project | null, deps: UseChatDeps) {
     addLocalMessage(tempUserMsg)
     setIsLoading(true)
     setStreamingText(null)
+
+    // Create abort controller for this generation
+    const abortController = new AbortController()
+    abortRef.current = abortController
 
     // Save user message to DB
     await addMessage({
@@ -93,8 +110,7 @@ export function useChat(project: Project | null, deps: UseChatDeps) {
       let text: string = ''
 
       if (useChunked) {
-        // === CHUNKED GENERATION (section by section) ===
-        setStreamingText('🔍 Analisando requisitos e planejando seções...')
+        setStreamingText('Analisando requisitos e planejando seções...')
 
         const result = await generateChunked(
           content,
@@ -104,25 +120,26 @@ export function useChat(project: Project | null, deps: UseChatDeps) {
           currentTemplate as Record<string, unknown> | null,
           {
             onPlanReady: (sections) => {
-              setStreamingText(`📋 Plano: ${sections.length} seções → ${sections.join(', ')}`)
+              setStreamingText(`Plano: ${sections.length} seções → ${sections.join(', ')}`)
             },
             onSectionStart: (i, total, name) => {
-              setStreamingText(`🏗️ Gerando seção ${i + 1}/${total}: ${name}...`)
+              setStreamingText(`Gerando seção ${i + 1}/${total}: ${name}...`)
             },
             onSectionStream: (i, total, name, streamText) => {
               const preview = streamText.length > 200 ? streamText.substring(streamText.length - 200) : streamText
-              setStreamingText(`🏗️ Seção ${i + 1}/${total}: ${name}\n\n${preview}`)
+              setStreamingText(`Seção ${i + 1}/${total}: ${name}\n\n${preview}`)
             },
             onSectionComplete: (i, total, name) => {
-              setStreamingText(`✅ Seção ${i + 1}/${total} concluída: ${name}`)
+              setStreamingText(`Seção ${i + 1}/${total} concluída: ${name}`)
             },
             onAssembling: () => {
-              setStreamingText('📦 Montando template completo...')
+              setStreamingText('Montando template completo...')
             },
             onError: (error) => {
-              setStreamingText(`❌ ${error}`)
+              setStreamingText(`${error}`)
             },
-          }
+          },
+          abortController.signal
         )
 
         if (result) {
@@ -130,7 +147,6 @@ export function useChat(project: Project | null, deps: UseChatDeps) {
           text = result.explanation
         }
       } else {
-        // === SINGLE GENERATION (small changes, image-based, etc.) ===
         if (currentTemplate && !allMessages.some((m) => m.role === 'ai' && m.template_json)) {
           apiMessages.splice(Math.max(0, apiMessages.length - 1), 0, {
             role: 'assistant',
@@ -143,7 +159,8 @@ export function useChat(project: Project | null, deps: UseChatDeps) {
           currentProject?.model || 'claude-sonnet-4-5-20250929',
           systemPrompt,
           (partial) => setStreamingText(partial),
-          (status) => setStreamingText('⚡ ' + status)
+          (status) => setStreamingText(status),
+          abortController.signal
         )
 
         json = extractJsonFromResponse(fullResponse) as ElementorTemplate | null
@@ -162,10 +179,11 @@ export function useChat(project: Project | null, deps: UseChatDeps) {
         template_json: json,
       })
 
-      // Update project template — uses the SAME updateProject from AppLayout
+      // Update project template
       if (json && currentProjectId) {
         await deps.updateProject(currentProjectId, { current_template: json })
         await saveVersion(json)
+        toast.success('Template gerado e salvo!')
       }
 
       if (aiMsg) {
@@ -176,16 +194,21 @@ export function useChat(project: Project | null, deps: UseChatDeps) {
       }
     } catch (error) {
       setStreamingText(null)
+      if (abortController.signal.aborted) return // Don't show error if intentionally cancelled
+
+      const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido'
+      toast.error(`Erro na geração: ${errorMsg}`)
       addLocalMessage({
         id: generateId(),
         project_id: currentProjectId,
         role: 'ai',
-        content: `Erro ao conectar com a IA: ${error instanceof Error ? error.message : 'Erro desconhecido'}. Tente novamente.`,
+        content: `Erro ao conectar com a IA: ${errorMsg}. Tente novamente.`,
         template_json: null,
         created_at: new Date().toISOString(),
       })
     } finally {
       setIsLoading(false)
+      abortRef.current = null
     }
   }
 
@@ -193,6 +216,7 @@ export function useChat(project: Project | null, deps: UseChatDeps) {
     messages,
     messagesLoading,
     sendMessage,
+    cancelGeneration,
     clearMessages,
     refetchMessages,
   }

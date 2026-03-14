@@ -1,4 +1,7 @@
-import { API_KEY, API_BASE_URL } from '@/lib/constants'
+import { streamRequest, extractJsonFromResponse, extractTextFromResponse } from './streaming'
+
+// Re-export for backward compatibility
+export { extractJsonFromResponse, extractTextFromResponse }
 
 export const DEFAULT_SYSTEM_PROMPT = `Você é o Lion Dev, um assistente especializado em criar templates de páginas WordPress 100% compatíveis com o plugin Elementor.
 
@@ -90,108 +93,21 @@ interface ChatMessagePayload {
   content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>
 }
 
-async function streamRequest(
-  messages: ChatMessagePayload[],
-  model: string,
-  systemPrompt: string,
-  onChunk?: (text: string) => void
-): Promise<{ text: string; finishReason: string | null }> {
-  const response = await fetch(`${API_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${API_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'system', content: systemPrompt }, ...messages],
-      max_tokens: 64000,
-      stream: !!onChunk,
-    }),
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`API Error (${response.status}): ${error}`)
-  }
-
-  if (onChunk && response.body) {
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let fullText = ''
-    let buffer = ''
-    let finishReason: string | null = null
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data: ')) continue
-        const data = trimmed.slice(6)
-        if (data === '[DONE]') continue
-
-        try {
-          const parsed = JSON.parse(data)
-          const content = parsed.choices?.[0]?.delta?.content
-          const reason = parsed.choices?.[0]?.finish_reason
-          if (reason) finishReason = reason
-          if (content) {
-            fullText += content
-            onChunk(fullText)
-          }
-        } catch {
-          // skip malformed chunks
-        }
-      }
-    }
-
-    if (buffer.trim().startsWith('data: ')) {
-      const data = buffer.trim().slice(6)
-      if (data !== '[DONE]') {
-        try {
-          const parsed = JSON.parse(data)
-          const content = parsed.choices?.[0]?.delta?.content
-          const reason = parsed.choices?.[0]?.finish_reason
-          if (reason) finishReason = reason
-          if (content) fullText += content
-        } catch { /* skip */ }
-      }
-    }
-
-    return { text: fullText, finishReason }
-  }
-
-  const data = await response.json()
-  return {
-    text: data.choices?.[0]?.message?.content ?? '',
-    finishReason: data.choices?.[0]?.finish_reason ?? null,
-  }
-}
-
 function isJsonTruncated(text: string): boolean {
-  // Find the start of a JSON block
   const jsonStart = text.indexOf('```json')
   if (jsonStart === -1) return false
 
   const afterMarker = text.substring(jsonStart + 7)
   const closingBackticks = afterMarker.indexOf('```')
 
-  // If no closing ```, JSON is truncated
   if (closingBackticks === -1) return true
 
-  // Check if the JSON between markers is valid
   const jsonContent = afterMarker.substring(0, closingBackticks).trim()
   try {
     JSON.parse(jsonContent)
-    return false // Valid JSON = not truncated
+    return false
   } catch {
-    return true // Invalid JSON = likely truncated
+    return true
   }
 }
 
@@ -202,23 +118,17 @@ function extractPartialJson(text: string): string {
 }
 
 function mergeResponses(original: string, continuation: string): string {
-  // Get the partial JSON from original
   const partialJson = extractPartialJson(original)
-
-  // Get the text before the json block
   const jsonStart = original.indexOf('```json')
   const textBefore = jsonStart > 0 ? original.substring(0, jsonStart) : ''
 
-  // Clean the continuation - remove any leading ```json markers
-  let cleanContinuation = continuation
+  const cleanContinuation = continuation
     .replace(/^[\s\S]*?```json\s*/i, '')
     .replace(/```[\s\S]*$/, '')
     .trim()
 
-  // If continuation starts where partial left off, or just continues the JSON
   const mergedJson = partialJson + cleanContinuation
 
-  // Try to get the text explanation after JSON in continuation
   const afterJsonMatch = continuation.match(/```\s*\n+([\s\S]+)$/)
   const textAfter = afterJsonMatch ? afterJsonMatch[1].trim() : ''
 
@@ -232,13 +142,19 @@ export async function sendChatMessage(
   model: string,
   systemPrompt: string,
   onChunk?: (text: string) => void,
-  onStatus?: (status: string) => void
+  onStatus?: (status: string) => void,
+  signal?: AbortSignal
 ): Promise<string> {
   let fullResponse = ''
   let continuations = 0
 
-  // First request
-  const first = await streamRequest(messages, model, systemPrompt, onChunk)
+  const first = await streamRequest({
+    messages: messages,
+    model,
+    systemPrompt,
+    onChunk,
+    signal,
+  })
   fullResponse = first.text
 
   // Auto-continue if JSON is truncated
@@ -251,22 +167,20 @@ export async function sendChatMessage(
 
     const continueMessages: ChatMessagePayload[] = [
       ...messages,
-      {
-        role: 'assistant',
-        content: fullResponse,
-      },
+      { role: 'assistant', content: fullResponse },
       {
         role: 'user',
         content: `O JSON foi cortado no meio. Continue EXATAMENTE de onde parou. Aqui estão os últimos caracteres que você gerou:\n\n...${last500}\n\nContinue a partir daqui SEM repetir nada. Retorne SOMENTE a continuação do JSON bruto, sem \`\`\`json no início. Quando terminar o JSON, feche com \`\`\` e adicione uma breve explicação.`,
       },
     ]
 
-    const continuation = await streamRequest(
-      continueMessages,
+    const continuation = await streamRequest({
+      messages: continueMessages,
       model,
       systemPrompt,
-      onChunk ? (text) => onChunk(fullResponse + '\n[continuando...]\n' + text) : undefined
-    )
+      onChunk: onChunk ? (text) => onChunk(fullResponse + '\n[continuando...]\n' + text) : undefined,
+      signal,
+    })
 
     fullResponse = mergeResponses(fullResponse, continuation.text)
   }
@@ -276,40 +190,4 @@ export async function sendChatMessage(
   }
 
   return fullResponse
-}
-
-export function extractJsonFromResponse(text: string): Record<string, unknown> | null {
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/)
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[1].trim())
-    } catch { /* malformed */ }
-  }
-
-  const codeMatch = text.match(/```\s*([\s\S]*?)```/)
-  if (codeMatch) {
-    try {
-      const parsed = JSON.parse(codeMatch[1].trim())
-      if (parsed && typeof parsed === 'object') return parsed
-    } catch { /* not json */ }
-  }
-
-  try {
-    const startIdx = text.indexOf('{')
-    const endIdx = text.lastIndexOf('}')
-    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-      const parsed = JSON.parse(text.substring(startIdx, endIdx + 1))
-      if (parsed && (parsed.content || parsed.title)) return parsed
-    }
-  } catch { /* not valid */ }
-
-  return null
-}
-
-export function extractTextFromResponse(text: string): string {
-  return text
-    .replace(/```json\s*[\s\S]*?```/g, '')
-    .replace(/```\s*[\s\S]*?```/g, '')
-    .replace(/\[continuando\.\.\.\]/g, '')
-    .trim()
 }

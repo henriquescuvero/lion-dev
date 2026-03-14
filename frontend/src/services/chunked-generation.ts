@@ -1,4 +1,4 @@
-import { API_KEY, API_BASE_URL } from '@/lib/constants'
+import { streamRequest, extractJsonFromResponse } from './streaming'
 
 interface ChatMessagePayload {
   role: 'system' | 'user' | 'assistant'
@@ -20,79 +20,6 @@ interface ChunkedCallbacks {
   onAssembling?: () => void
   onComplete?: (template: Record<string, unknown>) => void
   onError?: (error: string) => void
-}
-
-async function apiCall(
-  messages: ChatMessagePayload[],
-  model: string,
-  systemPrompt: string,
-  onStream?: (text: string) => void
-): Promise<string> {
-  const response = await fetch(`${API_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${API_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'system', content: systemPrompt }, ...messages],
-      max_tokens: 16384,
-      stream: !!onStream,
-    }),
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`API Error (${response.status}): ${error}`)
-  }
-
-  if (onStream && response.body) {
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let fullText = ''
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data: ')) continue
-        const data = trimmed.slice(6)
-        if (data === '[DONE]') continue
-        try {
-          const parsed = JSON.parse(data)
-          const content = parsed.choices?.[0]?.delta?.content
-          if (content) {
-            fullText += content
-            onStream(fullText)
-          }
-        } catch { /* skip */ }
-      }
-    }
-
-    if (buffer.trim().startsWith('data: ')) {
-      const data = buffer.trim().slice(6)
-      if (data !== '[DONE]') {
-        try {
-          const parsed = JSON.parse(data)
-          const content = parsed.choices?.[0]?.delta?.content
-          if (content) fullText += content
-        } catch { /* skip */ }
-      }
-    }
-
-    return fullText
-  }
-
-  const data = await response.json()
-  return data.choices?.[0]?.message?.content ?? ''
 }
 
 const PLAN_PROMPT = `Você é um planejador de templates Elementor. O usuário vai descrever uma página.
@@ -144,23 +71,22 @@ Regras:
 7. Widgets disponíveis: heading, text-editor, button, image, icon-box, counter, testimonial, star-rating, divider, spacer, social-icons, video, accordion, image-gallery, progress, alert
 8. Ícones: fas fa-rocket, fas fa-shield-alt, fas fa-chart-line, fas fa-headphones, fas fa-star, fas fa-check, fas fa-heart, fas fa-bolt, fas fa-globe, fas fa-users, etc.`
 
-function extractJsonBlock(text: string): Record<string, unknown> | null {
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/)
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[1].trim())
-    } catch { /* malformed */ }
-  }
-
-  try {
-    const startIdx = text.indexOf('{')
-    const endIdx = text.lastIndexOf('}')
-    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-      return JSON.parse(text.substring(startIdx, endIdx + 1))
-    }
-  } catch { /* not valid */ }
-
-  return null
+async function apiCall(
+  messages: ChatMessagePayload[],
+  model: string,
+  systemPrompt: string,
+  onStream?: (text: string) => void,
+  signal?: AbortSignal
+): Promise<string> {
+  const result = await streamRequest({
+    messages,
+    model,
+    systemPrompt,
+    maxTokens: 16384,
+    onChunk: onStream,
+    signal,
+  })
+  return result.text
 }
 
 export async function generateChunked(
@@ -169,7 +95,8 @@ export async function generateChunked(
   model: string,
   customSystemPrompt: string | null,
   existingTemplate: Record<string, unknown> | null,
-  callbacks: ChunkedCallbacks
+  callbacks: ChunkedCallbacks,
+  signal?: AbortSignal
 ): Promise<{ template: Record<string, unknown>; explanation: string } | null> {
   try {
     // === STEP 1: Plan the sections ===
@@ -185,11 +112,11 @@ export async function generateChunked(
       })
     }
 
-    const planResponse = await apiCall(planMessages, model, PLAN_PROMPT)
-    const plan = extractJsonBlock(planResponse) as SectionPlan | null
+    const planResponse = await apiCall(planMessages, model, PLAN_PROMPT, undefined, signal)
+    const plan = extractJsonFromResponse(planResponse) as SectionPlan | null
 
     if (!plan?.sections?.length) {
-      callbacks.onError?.('Não foi possível planejar as seções da página')
+      callbacks.onError?.('Não foi possível planejar as seções da página. Tente descrever com mais detalhes.')
       return null
     }
 
@@ -201,6 +128,12 @@ export async function generateChunked(
     const totalSections = plan.sections.length
 
     for (let i = 0; i < totalSections; i++) {
+      // Check if cancelled
+      if (signal?.aborted) {
+        callbacks.onError?.('Geração cancelada pelo usuário')
+        return null
+      }
+
       const section = plan.sections[i]
       callbacks.onSectionStart?.(i, totalSections, section.name)
 
@@ -221,19 +154,20 @@ ${i > 0 ? `Seções já geradas: ${plan.sections.slice(0, i).map((s) => s.name).
         sectionMessages,
         model,
         customSystemPrompt ? SECTION_PROMPT + '\n\nContexto adicional:\n' + customSystemPrompt.substring(0, 500) : SECTION_PROMPT,
-        (text) => callbacks.onSectionStream?.(i, totalSections, section.name, text)
+        (text) => callbacks.onSectionStream?.(i, totalSections, section.name, text),
+        signal
       )
 
-      const sectionJson = extractJsonBlock(sectionResponse)
+      const sectionJson = extractJsonFromResponse(sectionResponse)
 
       if (sectionJson) {
         generatedSections.push(sectionJson)
         callbacks.onSectionComplete?.(i, totalSections, section.name)
       } else {
         // Retry once for failed section
-        callbacks.onSectionStream?.(i, totalSections, section.name, '⚠️ Regenerando seção...')
-        const retryResponse = await apiCall(sectionMessages, model, SECTION_PROMPT)
-        const retryJson = extractJsonBlock(retryResponse)
+        callbacks.onSectionStream?.(i, totalSections, section.name, 'Regenerando seção...')
+        const retryResponse = await apiCall(sectionMessages, model, SECTION_PROMPT, undefined, signal)
+        const retryJson = extractJsonFromResponse(retryResponse)
         if (retryJson) {
           generatedSections.push(retryJson)
           callbacks.onSectionComplete?.(i, totalSections, section.name)
@@ -244,7 +178,7 @@ ${i > 0 ? `Seções já geradas: ${plan.sections.slice(0, i).map((s) => s.name).
     }
 
     if (generatedSections.length === 0) {
-      callbacks.onError?.('Nenhuma seção foi gerada com sucesso')
+      callbacks.onError?.('Nenhuma seção foi gerada com sucesso. Tente novamente com uma descrição diferente.')
       return null
     }
 
@@ -267,7 +201,7 @@ ${i > 0 ? `Seções já geradas: ${plan.sections.slice(0, i).map((s) => s.name).
     try {
       JSON.stringify(template)
     } catch {
-      callbacks.onError?.('Erro ao montar o template final')
+      callbacks.onError?.('Erro ao montar o template final. Tente novamente.')
       return null
     }
 
@@ -277,7 +211,11 @@ ${i > 0 ? `Seções já geradas: ${plan.sections.slice(0, i).map((s) => s.name).
 
     return { template, explanation }
   } catch (error) {
-    callbacks.onError?.(error instanceof Error ? error.message : 'Erro desconhecido')
+    if (signal?.aborted) {
+      callbacks.onError?.('Geração cancelada pelo usuário')
+      return null
+    }
+    callbacks.onError?.(error instanceof Error ? error.message : 'Erro desconhecido na geração')
     return null
   }
 }
@@ -303,6 +241,5 @@ export function shouldUseChunkedGeneration(content: string, hasExistingTemplate:
   const isLargeRequest = largeIndicators.some((r) => r.test(content))
   const isModification = hasExistingTemplate && content.length > 20
 
-  // Use chunked for new large pages or significant modifications
   return isLargeRequest || (isModification && /alter|mud|troc|refaz|recri|remodel/i.test(content))
 }

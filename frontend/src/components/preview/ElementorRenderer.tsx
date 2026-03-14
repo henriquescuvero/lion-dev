@@ -1,6 +1,7 @@
 import { Star, ChevronDown } from 'lucide-react'
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import type { ElementorElement } from '@/types/elementor'
+import { sanitizeHtml } from '@/lib/sanitize'
 
 interface ElementorRendererProps {
   elements: ElementorElement[]
@@ -10,7 +11,7 @@ interface ElementorRendererProps {
   onElementSelect?: (id: string) => void
 }
 
-export function ElementorRenderer({ elements, editMode, onTextEdit, selectedElementId, onElementSelect }: ElementorRendererProps) {
+export const ElementorRenderer = memo(function ElementorRenderer({ elements, editMode, onTextEdit, selectedElementId, onElementSelect }: ElementorRendererProps) {
   return (
     <>
       {elements.map((el) => (
@@ -18,7 +19,7 @@ export function ElementorRenderer({ elements, editMode, onTextEdit, selectedElem
       ))}
     </>
   )
-}
+})
 
 function RenderElement({
   element,
@@ -288,7 +289,7 @@ function RenderWidget({
       const align = getAlignStyle(s.align as string)
       const color = s.text_color as string
       const style = { ...typo, ...align, color: color || 'inherit', ...wrapStyle }
-      const html = (s.editor as string) || ''
+      const html = sanitizeHtml((s.editor as string) || '')
       if (editMode) {
         return (
           <div
@@ -721,7 +722,7 @@ function AccordionItem({ title, content }: { title: string; content: string }) {
       {open && (
         <div
           style={{ padding: '0 0 12px', fontSize: '14px', color: '#999' }}
-          dangerouslySetInnerHTML={{ __html: content }}
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(content) }}
         />
       )}
     </div>
